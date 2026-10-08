@@ -48,13 +48,14 @@ export default function App() {
 
   // Subscribe to real-time online Cloud Firestore database
   useEffect(() => {
-    // 1. One-time clear of sample data as requested by user
-    if (localStorage.getItem('adl_has_cleared_initial_v4') !== 'true') {
-      storageService.clearAllPatients();
-      localStorage.setItem('adl_has_cleared_initial_v4', 'true');
-    }
+    // 1. Clear any legacy mock caches
+    try {
+      ['adl_patient_registry_v1', 'adl_patient_registry_v2', 'adl_patient_registry_v3', 'adl_patient_registry_v4', 'adl_has_cleared_initial_v4'].forEach((k) => {
+        localStorage.removeItem(k);
+      });
+    } catch {}
 
-    // 2. Initial cached data
+    // 2. Initial cached data (empty if no real patients)
     const cached = storageService.getPatients();
     setPatients(cached);
 
@@ -103,17 +104,22 @@ export default function App() {
 
   // Delete patient from Cloud Firestore
   const handleDeletePatient = async (id: string) => {
-    await storageService.deletePatient(id);
+    // Immediately remove from UI
+    setPatients((prev) => prev.filter((p) => p.id !== id));
     if (detailPatient?.id === id) {
       setDetailPatient(null);
     }
+    await storageService.deletePatient(id);
     showToast('ลบข้อมูลออกจากระบบออนไลน์เรียบร้อยแล้ว');
   };
 
   // Clear all patients
   const handleClearAllPatients = async () => {
-    await storageService.clearAllPatients();
     setPatients([]);
+    if (detailPatient) {
+      setDetailPatient(null);
+    }
+    await storageService.clearAllPatients();
     showToast('ลบรายชื่อผู้ป่วยทั้งหมดออกจากระบบเรียบร้อยแล้ว');
   };
 
@@ -238,6 +244,7 @@ export default function App() {
                 onReAssessPatient={handleReAssessPatient}
                 onPrintPatient={handleOpenPrint}
                 onDeletePatient={handleDeletePatient}
+                onClearAll={handleClearAllPatients}
               />
             )}
 

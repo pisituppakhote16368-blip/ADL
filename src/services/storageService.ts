@@ -11,8 +11,19 @@ import {
   getDocs,
 } from 'firebase/firestore';
 
-const STORAGE_KEY = 'adl_patient_registry_v1';
+const STORAGE_KEY = 'adl_patient_registry_v5';
 const PATIENTS_COLLECTION = 'patients';
+
+// Purge legacy mock data cache keys on load
+if (typeof window !== 'undefined') {
+  try {
+    ['adl_patient_registry_v1', 'adl_patient_registry_v2', 'adl_patient_registry_v3', 'adl_patient_registry_v4'].forEach((k) => {
+      localStorage.removeItem(k);
+    });
+  } catch {
+    // Ignore storage errors in restricted contexts
+  }
+}
 
 export const storageService = {
   /**
