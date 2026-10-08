@@ -20,6 +20,7 @@ export default function App() {
     return localStorage.getItem('adl_is_admin') === 'true';
   });
   const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
+  const [isOnline, setIsOnline] = useState<boolean>(true);
 
   // Admin Navigation Tabs
   const [currentTab, setCurrentTab] = useState<'dashboard' | 'patients' | 'villages' | 'print'>('dashboard');
@@ -45,10 +46,29 @@ export default function App() {
     }, 3500);
   };
 
-  // Load patients from local storage
+  // Subscribe to real-time online Cloud Firestore database
   useEffect(() => {
-    const data = storageService.getPatients();
-    setPatients(data);
+    // 1. One-time clear of sample data as requested by user
+    if (localStorage.getItem('adl_has_cleared_initial_v4') !== 'true') {
+      storageService.clearAllPatients();
+      localStorage.setItem('adl_has_cleared_initial_v4', 'true');
+    }
+
+    // 2. Initial cached data
+    const cached = storageService.getPatients();
+    setPatients(cached);
+
+    // 3. Real-time online sync across all devices that open the link!
+    const unsubscribe = storageService.subscribeToPatients(
+      (onlinePatients) => {
+        setPatients(onlinePatients);
+      },
+      (onlineStatus) => {
+        setIsOnline(onlineStatus);
+      }
+    );
+
+    return () => unsubscribe();
   }, []);
 
   // Admin Login Handler
@@ -65,43 +85,45 @@ export default function App() {
     showToast('ออกจากระบบผู้ดูแลระบบแล้ว กลับสู่หน้าประเมินสาธารณะ');
   };
 
-  // Save or Update patient
-  const handleSavePatient = (patient: Patient) => {
-    let updated: Patient[];
+  // Save or Update patient to Cloud Firestore
+  const handleSavePatient = async (patient: Patient) => {
     const exists = patients.some((p) => p.id === patient.id);
+    await storageService.savePatient(patient);
+
     if (exists) {
-      updated = storageService.updatePatient(patient);
-      showToast(`อัปเดตข้อมูลของ "${patient.prefix}${patient.firstName} ${patient.lastName}" สำเร็จ`);
+      showToast(`อัปเดตข้อมูลของ "${patient.prefix}${patient.firstName} ${patient.lastName}" บันทึกออนไลน์สำเร็จ`);
     } else {
-      updated = storageService.addPatient(patient);
-      showToast(`บันทึกการประเมิน ADL ของ "${patient.prefix}${patient.firstName} ${patient.lastName}" สำเร็จ`);
+      showToast(`บันทึกแบบประเมินของ "${patient.prefix}${patient.firstName} ${patient.lastName}" ออนไลน์เรียบร้อย`);
     }
-    setPatients(updated);
 
     if (detailPatient && detailPatient.id === patient.id) {
       setDetailPatient(patient);
     }
   };
 
-  // Delete patient
-  const handleDeletePatient = (id: string) => {
-    const updated = storageService.deletePatient(id);
-    setPatients(updated);
+  // Delete patient from Cloud Firestore
+  const handleDeletePatient = async (id: string) => {
+    await storageService.deletePatient(id);
     if (detailPatient?.id === id) {
       setDetailPatient(null);
     }
-    showToast('ลบข้อมูลผู้ป่วยเรียบร้อยแล้ว');
+    showToast('ลบข้อมูลออกจากระบบออนไลน์เรียบร้อยแล้ว');
   };
 
-  // Reset to default sample patients
-  const handleResetData = () => {
-    if (confirm('คุณต้องการรีเซ็ตข้อมูลตัวอย่าง 8 หมู่บ้านเริ่มต้นใหม่ทั้งหมดหรือไม่? ข้อมูลที่แก้ไขจะถูกแทนที่ด้วยข้อมูลตัวอย่าง')) {
-      const reset = storageService.resetToDefault();
-      setPatients(reset);
-      setSelectedVillage('all');
-      setSelectedCategory('all');
-      showToast('คืนค่าข้อมูลตัวอย่าง 8 หมู่บ้านเรียบร้อยแล้ว');
-    }
+  // Clear all patients
+  const handleClearAllPatients = async () => {
+    await storageService.clearAllPatients();
+    setPatients([]);
+    showToast('ลบรายชื่อผู้ป่วยทั้งหมดออกจากระบบเรียบร้อยแล้ว');
+  };
+
+  // Load sample data (8 villages)
+  const handleResetData = async () => {
+    const loaded = await storageService.loadSampleData();
+    setPatients(loaded);
+    setSelectedVillage('all');
+    setSelectedCategory('all');
+    showToast('โหลดข้อมูลตัวอย่าง 8 หมู่บ้านเรียบร้อยแล้ว');
   };
 
   // Export CSV
@@ -162,6 +184,7 @@ export default function App() {
       <div className="print:hidden">
         <Navbar
           isAdmin={isAdmin}
+          isOnline={isOnline}
           currentTab={currentTab === 'print' ? 'patients' : currentTab}
           onSelectTab={(tab) => {
             setCurrentTab(tab);
@@ -170,6 +193,7 @@ export default function App() {
           onOpenNewAssessment={handleOpenNewAssessment}
           onExportCSV={handleExportCSV}
           onResetData={handleResetData}
+          onClearAll={handleClearAllPatients}
           onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
           onAdminLogout={handleAdminLogout}
           totalPatients={patients.length}

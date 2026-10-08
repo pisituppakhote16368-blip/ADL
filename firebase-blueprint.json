@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "Patient": {
+      "title": "Patient",
+      "description": "Elderly and dependent patient record with Barthel ADL assessment and photos across 8 villages",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "prefix": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "citizenId": { "type": "string" },
+        "birthDate": { "type": "string" },
+        "age": { "type": "number" },
+        "gender": { "type": "string" },
+        "phone": { "type": "string" },
+        "houseNumber": { "type": "string" },
+        "street": { "type": "string" },
+        "villageId": { "type": "number" },
+        "villageName": { "type": "string" },
+        "subdistrict": { "type": "string" },
+        "district": { "type": "string" },
+        "province": { "type": "string" },
+        "postalCode": { "type": "string" },
+        "landmarks": { "type": "string" },
+        "caregiver": { "type": "object" },
+        "healthRights": { "type": "string" },
+        "chronicDiseases": { "type": "array" },
+        "specialConditions": { "type": "object" },
+        "idCardPhoto": { "type": "string" },
+        "patientPhoto": { "type": "string" },
+        "currentADL": { "type": "object" },
+        "assessmentHistory": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "firstName", "lastName", "villageId", "houseNumber", "currentADL"]
+    }
+  },
+  "firestore": {
+    "/patients/{patientId}": {
+      "schema": { "$ref": "#/entities/Patient" },
+      "description": "Collection of community patient ADL assessment records"
+    }
+  }
+}

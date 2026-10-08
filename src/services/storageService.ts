@@ -1,63 +1,173 @@
 import { Patient } from '../types';
 import { INITIAL_PATIENTS } from '../constants/villages';
+import { db } from './firebase';
+import {
+  collection,
+  doc,
+  setDoc,
+  deleteDoc,
+  onSnapshot,
+  writeBatch,
+  getDocs,
+} from 'firebase/firestore';
 
 const STORAGE_KEY = 'adl_patient_registry_v1';
+const PATIENTS_COLLECTION = 'patients';
 
 export const storageService = {
+  /**
+   * Get cached patients from localStorage
+   */
   getPatients(): Patient[] {
     try {
       const data = localStorage.getItem(STORAGE_KEY);
       if (!data) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_PATIENTS));
-        return INITIAL_PATIENTS;
+        return [];
       }
       const parsed = JSON.parse(data);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         return parsed;
       }
-      return INITIAL_PATIENTS;
+      return [];
     } catch (e) {
       console.error('Error reading patients from localStorage:', e);
-      return INITIAL_PATIENTS;
+      return [];
     }
   },
 
-  savePatients(patients: Patient[]): boolean {
+  /**
+   * Save local cache
+   */
+  saveLocalCache(patients: Patient[]): void {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(patients));
-      return true;
     } catch (e) {
-      console.error('Error saving patients to localStorage:', e);
-      return false;
+      console.error('Error saving local cache:', e);
     }
   },
 
-  addPatient(patient: Patient): Patient[] {
-    const current = this.getPatients();
-    const updated = [patient, ...current];
-    this.savePatients(updated);
-    return updated;
+  /**
+   * Subscribe to real-time online updates from Cloud Firestore
+   * Synchronizes data live across all users who have the link!
+   */
+  subscribeToPatients(
+    onData: (patients: Patient[]) => void,
+    onStatus?: (isOnline: boolean) => void
+  ): () => void {
+    const colRef = collection(db, PATIENTS_COLLECTION);
+
+    const unsubscribe = onSnapshot(
+      colRef,
+      (snapshot) => {
+        onStatus?.(true);
+
+        if (snapshot.empty) {
+          // If Firestore is empty, do not seed mock patients automatically
+          this.saveLocalCache([]);
+          onData([]);
+          return;
+        }
+
+        const items: Patient[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push(docSnap.data() as Patient);
+        });
+
+        // Sort by updatedAt or createdAt desc
+        items.sort(
+          (a, b) =>
+            new Date(b.updatedAt || b.createdAt).getTime() -
+            new Date(a.updatedAt || a.createdAt).getTime()
+        );
+
+        this.saveLocalCache(items);
+        onData(items);
+      },
+      (error) => {
+        console.warn('Firestore real-time subscription error, using local cache:', error);
+        onStatus?.(false);
+        onData(this.getPatients());
+      }
+    );
+
+    return unsubscribe;
   },
 
-  updatePatient(patient: Patient): Patient[] {
+  /**
+   * Save or Update patient to Cloud Firestore and local cache
+   */
+  async savePatient(patient: Patient): Promise<void> {
     const current = this.getPatients();
-    const updated = current.map((p) => (p.id === patient.id ? patient : p));
-    this.savePatients(updated);
-    return updated;
+    const exists = current.some((p) => p.id === patient.id);
+    const updated = exists
+      ? current.map((p) => (p.id === patient.id ? patient : p))
+      : [patient, ...current];
+    this.saveLocalCache(updated);
+
+    try {
+      const docRef = doc(db, PATIENTS_COLLECTION, patient.id);
+      await setDoc(docRef, patient, { merge: true });
+    } catch (e) {
+      console.error('Error saving patient to Firestore:', e);
+    }
   },
 
-  deletePatient(id: string): Patient[] {
+  /**
+   * Delete patient from Cloud Firestore and local cache
+   */
+  async deletePatient(id: string): Promise<void> {
     const current = this.getPatients();
     const updated = current.filter((p) => p.id !== id);
-    this.savePatients(updated);
-    return updated;
+    this.saveLocalCache(updated);
+
+    try {
+      const docRef = doc(db, PATIENTS_COLLECTION, id);
+      await deleteDoc(docRef);
+    } catch (e) {
+      console.error('Error deleting patient from Firestore:', e);
+    }
   },
 
-  resetToDefault(): Patient[] {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_PATIENTS));
+  /**
+   * Clear all patients from Firestore online and local cache
+   */
+  async clearAllPatients(): Promise<void> {
+    this.saveLocalCache([]);
+
+    try {
+      const snapshot = await getDocs(collection(db, PATIENTS_COLLECTION));
+      if (!snapshot.empty) {
+        const batch = writeBatch(db);
+        snapshot.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+      }
+    } catch (e) {
+      console.error('Error clearing all patients from Firestore:', e);
+    }
+  },
+
+  /**
+   * Load or reset sample data (8 villages initial demo patients)
+   */
+  async loadSampleData(): Promise<Patient[]> {
+    this.saveLocalCache(INITIAL_PATIENTS);
+
+    try {
+      const batch = writeBatch(db);
+      INITIAL_PATIENTS.forEach((p) => {
+        batch.set(doc(db, PATIENTS_COLLECTION, p.id), p);
+      });
+      await batch.commit();
+    } catch (e) {
+      console.error('Error seeding sample patients to Firestore:', e);
+    }
+
     return INITIAL_PATIENTS;
   },
 
+  /**
+   * Export all patients to CSV (Excel with Thai UTF-8 BOM)
+   */
   exportToCSV(patients: Patient[]): void {
     const headers = [
       'ลำดับ',
@@ -114,7 +224,6 @@ export const storageService = {
       ].join(',');
     });
 
-    // Add UTF-8 BOM so Excel opens Thai characters cleanly
     const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -127,6 +236,9 @@ export const storageService = {
     URL.revokeObjectURL(url);
   },
 
+  /**
+   * Export single patient evaluation to Excel
+   */
   exportSinglePatientToExcel(patient: Patient): void {
     const adl = patient.currentADL;
     const categoryNames: Record<string, string> = {
@@ -176,13 +288,12 @@ export const storageService = {
     ];
 
     Object.values(questionsMap).forEach((q) => {
-      const score = (adl.answers as any)[Object.keys(questionsMap).find(k => questionsMap[k].no === q.no)!];
+      const score = (adl.answers as any)[Object.keys(questionsMap).find((k) => questionsMap[k].no === q.no)!];
       lines.push(`${q.no},"${q.name}",${score},${q.max},"${q.desc}"`);
     });
 
     lines.push(`รวม,คะแนนรวมทั้งหมด,${adl.totalScore},20,"${categoryNames[adl.category]}"`);
 
-    // Add UTF-8 BOM for Thai Excel
     const csvContent = '\uFEFF' + lines.join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -193,29 +304,5 @@ export const storageService = {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  },
-
-  exportToJSON(patients: Patient[]): void {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(patients, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `สำรองข้อมูลผู้ป่วย_ADL_${new Date().toISOString().slice(0, 10)}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  },
-
-  importFromJSON(jsonText: string): Patient[] | null {
-    try {
-      const parsed = JSON.parse(jsonText);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        this.savePatients(parsed);
-        return parsed;
-      }
-      return null;
-    } catch (e) {
-      console.error('Invalid JSON import:', e);
-      return null;
-    }
   },
 };
