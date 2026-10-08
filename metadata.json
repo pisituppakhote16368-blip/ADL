@@ -1,0 +1,6 @@
+{
+  "name": "ระบบประเมินภาวะพึ่งพิง ADL ชุมชน",
+  "description": "ระบบบันทึกและประเมินผู้ป่วยที่มีภาวะพึ่งพิงตามเกณฑ์ ADL (Barthel Index) สำหรับ 8 หมู่บ้าน พร้อมบันทึกภาพถ่ายบัตรประชาชนและผู้ป่วย",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
